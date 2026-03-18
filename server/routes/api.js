@@ -368,17 +368,24 @@ router.get('/stream/:videoId', async (req, res) => {
         // Proxy the audio stream to avoid CORS issues
         const protocol = audioUrl.startsWith('https') ? https : http;
 
-        const proxyReq = protocol.get(audioUrl, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                ...(req.headers.range ? { 'Range': req.headers.range } : {}),
-            }
-        }, (proxyRes) => {
-            // If upstream returns error, invalidate cache and report
+        // Use headers that YouTube accepts for direct stream URLs
+        const proxyHeaders = {
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.210 Mobile Safari/537.36',
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': 'https://www.youtube.com/',
+            'Origin': 'https://www.youtube.com',
+            'Connection': 'keep-alive',
+            ...(req.headers.range ? { 'Range': req.headers.range } : {}),
+        };
+
+        const proxyReq = protocol.get(audioUrl, { headers: proxyHeaders }, (proxyRes) => {
+            // If upstream returns error, log status and invalidate cache
             if (proxyRes.statusCode >= 400) {
+                console.error(`❌ Upstream ${proxyRes.statusCode} for ${videoId} — invalidating cache`);
                 audioUrlCache.delete(videoId);
                 if (!res.headersSent) {
-                    res.status(502).json({ error: 'Audio source returned an error' });
+                    res.status(502).json({ error: `Audio source returned ${proxyRes.statusCode}` });
                 }
                 return;
             }
