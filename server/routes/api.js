@@ -90,7 +90,7 @@ router.get('/stream/:videoId', async (req, res) => {
     const videoId = req.params.videoId;
     
     try {
-        const { isSuccess, data } = await safeFetchJson(`${SAAVN_BASE_URL}/songs/${videoId}`);
+        const { isSuccess, data } = await safeFetchJson(`${SAAVN_BASE_URL}/songs?id=${videoId}`);
         
         if (!isSuccess || !data || data.length === 0) {
             return res.status(404).json({ error: 'Song not found' });
@@ -154,7 +154,7 @@ router.get('/recommendations/:videoId', async (req, res) => {
     try {
         const videoId = req.params.videoId;
         
-        const { isSuccess: isSongFound, data: songDetailsData } = await safeFetchJson(`${SAAVN_BASE_URL}/songs/${videoId}`);
+        const { isSuccess: isSongFound, data: songDetailsData } = await safeFetchJson(`${SAAVN_BASE_URL}/songs?id=${videoId}`);
         
         if (!isSongFound || !songDetailsData || songDetailsData.length === 0) {
             return res.json({ results: [] });
@@ -230,14 +230,13 @@ router.get('/home', async (req, res) => {
 router.get('/song/:videoId', async (req, res) => {
     try {
         const videoId = req.params.videoId;
-        const response = await fetch(`${SAAVN_BASE_URL}/songs/${videoId}`);
-        const data = await response.json();
+        const { isSuccess, data } = await safeFetchJson(`${SAAVN_BASE_URL}/songs?id=${videoId}`);
         
-        if (!data.success || !data.data || data.data.length === 0) {
+        if (!isSuccess || !data || data.length === 0) {
             return res.status(404).json({ error: 'Song not found' });
         }
         
-        const song = data.data[0];
+        const song = data[0];
         const image = song.image?.find(i => i.quality === '500x500')?.link || song.image?.[song.image.length - 1]?.link || '';
         
         res.json({
@@ -258,14 +257,13 @@ router.get('/song/:videoId', async (req, res) => {
 router.get('/genre/:genreId', async (req, res) => {
     try {
         const genreId = req.params.genreId;
-        const response = await fetch(`${SAAVN_BASE_URL}/search/songs?query=${encodeURIComponent(genreId)}&limit=20`);
-        const data = await response.json();
+        const { isSuccess, data } = await safeFetchJson(`${SAAVN_BASE_URL}/search/songs?query=${encodeURIComponent(genreId)}&limit=20`);
         
-        if (!data.success || !data.data || !data.data.results) {
+        if (!isSuccess || !data || !data.results) {
             return res.json({ results: [] });
         }
         
-        const songs = data.data.results.map(song => {
+        const songs = data.results.map(song => {
             const image = song.image?.find(i => i.quality === '500x500')?.link || song.image?.[song.image.length - 1]?.link || '';
             return {
                 videoId: song.id,
@@ -288,14 +286,13 @@ router.get('/genre/:genreId', async (req, res) => {
 router.get('/playlist/:playlistId', async (req, res) => {
     try {
         const playlistId = req.params.playlistId;
-        const response = await fetch(`${SAAVN_BASE_URL}/playlists?id=${playlistId}`);
-        const data = await response.json();
+        const { isSuccess, data } = await safeFetchJson(`${SAAVN_BASE_URL}/playlists?id=${playlistId}`);
         
-        if (!data.success || !data.data || !data.data.songs) {
+        if (!isSuccess || !data || !data.songs) {
             return res.json({ results: [] });
         }
         
-        const songs = data.data.songs.map(song => {
+        const songs = data.songs.map(song => {
             const image = song.image?.find(i => i.quality === '500x500')?.link || song.image?.[song.image.length - 1]?.link || '';
             return {
                 videoId: song.id,
@@ -318,14 +315,13 @@ router.get('/playlist/:playlistId', async (req, res) => {
 router.get('/album/:albumId', async (req, res) => {
     try {
         const albumId = req.params.albumId;
-        const response = await fetch(`${SAAVN_BASE_URL}/albums?id=${albumId}`);
-        const data = await response.json();
+        const { isSuccess, data } = await safeFetchJson(`${SAAVN_BASE_URL}/albums?id=${albumId}`);
         
-        if (!data.success || !data.data || !data.data.songs) {
+        if (!isSuccess || !data || !data.songs) {
             return res.json({ results: [] });
         }
         
-        const songs = data.data.songs.map(song => {
+        const songs = data.songs.map(song => {
             const image = song.image?.find(i => i.quality === '500x500')?.link || song.image?.[song.image.length - 1]?.link || '';
             return {
                 videoId: song.id,
