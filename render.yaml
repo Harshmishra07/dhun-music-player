@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: dhun-server
+    env: node
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: ALLOWED_ORIGIN
+        sync: false  # Set this manually in Render dashboard to your Vercel URL
+    plan: free
