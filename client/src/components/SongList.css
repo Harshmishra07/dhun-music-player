@@ -1,0 +1,239 @@
+.song-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+}
+
+.song-item {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 16px;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    text-align: left;
+    width: 100%;
+    font-family: var(--font-primary);
+    animation: fadeIn 0.3s ease-out forwards;
+    color: var(--text-primary);
+}
+
+.song-item:hover {
+    background: var(--bg-card-hover);
+}
+
+.song-item.active {
+    background: var(--accent-gradient-soft);
+    border: 1px solid rgba(139, 92, 246, 0.15);
+}
+
+.song-thumb-wrapper {
+    position: relative;
+    width: 48px;
+    height: 48px;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.song-thumb {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.song-thumb-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-glass-strong);
+    color: var(--text-muted);
+    font-size: 1.1rem;
+}
+
+.song-play-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.5);
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+    color: white;
+    font-size: 1rem;
+}
+
+.song-item:hover .song-play-overlay,
+.song-item.active .song-play-overlay {
+    opacity: 1;
+}
+
+.song-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.song-title {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.song-item.active .song-title {
+    color: var(--accent-primary);
+}
+
+.song-artist {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.song-album {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 150px;
+    display: none;
+}
+
+@media (min-width: 768px) {
+    .song-album {
+        display: block;
+    }
+}
+
+.song-duration {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+    margin-right: 12px;
+}
+
+.song-add-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    flex-shrink: 0;
+}
+
+.song-add-btn:hover {
+    background: var(--bg-card-hover);
+    color: var(--accent-primary);
+    border-color: var(--accent-primary);
+    transform: scale(1.1);
+}
+
+/* Equalizer animation */
+.equalizer {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 16px;
+}
+
+.equalizer span {
+    display: block;
+    width: 3px;
+    background: var(--accent-primary);
+    border-radius: 2px;
+    animation: equalize 0.8s ease-in-out infinite;
+}
+
+.equalizer span:nth-child(1) {
+    height: 60%;
+    animation-delay: 0s;
+}
+
+.equalizer span:nth-child(2) {
+    height: 100%;
+    animation-delay: 0.2s;
+}
+
+.equalizer span:nth-child(3) {
+    height: 40%;
+    animation-delay: 0.4s;
+}
+
+.equalizer span:nth-child(4) {
+    height: 80%;
+    animation-delay: 0.1s;
+}
+
+@keyframes equalize {
+
+    0%,
+    100% {
+        height: 30%;
+    }
+
+    50% {
+        height: 100%;
+    }
+}
+
+/* Skeleton loading */
+.song-item.skeleton {
+    pointer-events: none;
+}
+
+.skeleton-thumb {
+    width: 48px;
+    height: 48px;
+    border-radius: var(--radius-sm);
+    background: linear-gradient(90deg, var(--bg-glass) 25%, var(--bg-glass-strong) 50%, var(--bg-glass) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+}
+
+.skeleton-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.skeleton-title {
+    width: 60%;
+    height: 14px;
+    border-radius: 4px;
+    background: linear-gradient(90deg, var(--bg-glass) 25%, var(--bg-glass-strong) 50%, var(--bg-glass) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+}
+
+.skeleton-artist {
+    width: 40%;
+    height: 12px;
+    border-radius: 4px;
+    background: linear-gradient(90deg, var(--bg-glass) 25%, var(--bg-glass-strong) 50%, var(--bg-glass) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    animation-delay: 0.2s;
+}

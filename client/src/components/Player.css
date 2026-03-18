@@ -1,0 +1,504 @@
+.player {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(180deg, rgba(10, 10, 15, 0.95) 0%, rgba(10, 10, 15, 0.98) 100%);
+    backdrop-filter: blur(30px);
+    border-top: 1px solid var(--border-color);
+    z-index: 1000;
+    padding: 0 24px 12px;
+    animation: fadeInUp 0.4s ease-out;
+    overflow: hidden;
+}
+
+.player-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    margin-top: 8px;
+    position: relative;
+    z-index: 1;
+}
+
+/* Song Info */
+.player-song-info {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex: 1;
+    min-width: 0;
+    max-width: 300px;
+    cursor: pointer;
+}
+
+.player-expand-btn {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1rem;
+    padding: 4px;
+    cursor: pointer;
+}
+
+.player-thumb-wrapper {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    overflow: hidden;
+    flex-shrink: 0;
+    box-shadow: var(--shadow-md);
+}
+
+.player-thumb {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+    transition: transform var(--transition-normal);
+}
+
+.player-thumb.spinning {
+    animation: spin-slow 8s linear infinite;
+}
+
+
+.player-thumb-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-glass-strong);
+    color: var(--text-muted);
+    font-size: 1.3rem;
+}
+
+.player-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.player-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.player-artist {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Controls */
+.player-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.control-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 8px;
+    border-radius: 50%;
+    transition: all var(--transition-fast);
+    font-size: 1.2rem;
+}
+
+.control-btn:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.control-btn.small {
+    font-size: 0.95rem;
+    padding: 6px;
+}
+
+.control-btn.active {
+    color: var(--accent-primary);
+}
+
+.control-btn.active:hover {
+    color: var(--accent-primary);
+    background: rgba(139, 92, 246, 0.15);
+}
+
+.play-btn {
+    width: 42px;
+    height: 42px;
+    background: var(--accent-gradient) !important;
+    color: white !important;
+    font-size: 1.1rem;
+    box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3);
+    transition: all var(--transition-normal);
+}
+
+.play-btn:hover {
+    transform: scale(1.08);
+    box-shadow: 0 6px 20px rgba(139, 92, 246, 0.5);
+}
+
+.spin {
+    animation: spin-slow 1s linear infinite;
+}
+
+/* Volume & Queue Container */
+.player-right-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    max-width: 280px;
+    justify-content: flex-end;
+}
+
+.queue-badge {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    background: var(--accent-primary);
+    color: white;
+    font-size: 0.55rem;
+    font-weight: 700;
+    min-width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+
+#queue-toggle-btn {
+    position: relative;
+}
+
+.player-volume {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.volume-slider {
+    width: 100px;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    outline: none;
+    cursor: pointer;
+}
+
+.volume-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px;
+    height: 12px;
+    background: white;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 0 4px rgba(0, 0, 0, 0.3);
+}
+
+.volume-slider::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    background: white;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+/* ─── Expanded Full-Screen Player ──────────────────────────────────── */
+.player-expanded {
+    position: fixed;
+    inset: 0;
+    z-index: 1200;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: fadeIn 0.3s ease-out;
+}
+
+.player-expanded-bg {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    transition: background 1.5s ease-out;
+}
+
+
+.player-expanded-content {
+    position: relative;
+    z-index: 1;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 40px 60px;
+    max-width: 1200px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+.player-expanded-body {
+    flex: 1;
+    display: flex;
+    gap: 6.25rem;
+    /* 100px */
+    align-items: center;
+    overflow: hidden;
+    margin-top: 20px;
+}
+
+.player-expanded-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 30px;
+    min-width: 0;
+}
+
+.player-expanded-queue-container {
+    width: 380px;
+    height: 90%;
+    max-height: 600px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: var(--radius-lg);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+}
+
+.player-collapse-btn {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.08);
+    border: none;
+    color: var(--text-secondary);
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 1.3rem;
+    transition: all var(--transition-fast);
+}
+
+.player-collapse-btn:hover {
+    background: rgba(255, 255, 255, 0.14);
+    color: var(--text-primary);
+}
+
+.player-expanded-art {
+    width: 340px;
+    height: 340px;
+    border-radius: 20px;
+    overflow: hidden;
+    box-shadow: 0 28px 80px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255,255,255,0.06);
+    flex-shrink: 0;
+    transition: box-shadow 1.2s ease, transform 0.4s ease;
+}
+
+.player-expanded-art:hover {
+    transform: scale(1.015);
+}
+
+.player-expanded-thumb {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: crisp-edges;
+    filter: contrast(1.06) saturate(1.12) brightness(1.02);
+    transition: transform 0.4s ease, filter 0.4s ease;
+    display: block;
+}
+
+.player-expanded-thumb.spinning {
+    /* spinning kept off in expanded view — looks better static */
+    animation: none;
+}
+
+
+.player-expanded-thumb-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-glass-strong);
+    color: var(--text-muted);
+    font-size: 4rem;
+}
+
+.player-expanded-meta {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+}
+
+.player-expanded-title {
+    font-family: var(--font-display);
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.player-expanded-artist {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.player-expanded-progress {
+    width: 100%;
+}
+
+.player-expanded-times {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 6px;
+    padding: 0 2px;
+}
+
+.player-expanded-controls {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.player-expanded-controls .control-btn {
+    font-size: 1.3rem;
+}
+
+.expanded-play-btn {
+    width: 56px;
+    height: 56px;
+    font-size: 1.4rem !important;
+}
+
+.player-expanded-actions {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    width: 100%;
+    justify-content: center;
+}
+
+.player-expanded-volume {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.player-expanded-actions .control-btn {
+    position: relative;
+}
+
+/* ─── Responsiveness ──────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .player-volume {
+        display: none;
+    }
+
+    .player-song-info {
+        max-width: 160px;
+    }
+
+    .player-controls .control-btn.small {
+        display: none;
+    }
+
+    .player-right-controls {
+        max-width: unset;
+        flex: 0;
+    }
+
+    /* Spotify-style vertical stack for expanded player */
+    .player-expanded-content {
+        padding: 20px 24px;
+        overflow-y: auto;
+        display: block;
+        /* Allow natural scrolling */
+    }
+
+    .player-expanded-body {
+        flex-direction: column;
+        gap: 40px;
+        overflow: visible;
+        /* Let the parent scroll */
+        height: auto;
+        align-items: center;
+    }
+
+    .player-expanded-main {
+        width: 100%;
+        flex: none;
+        gap: 32px;
+        padding-top: 40px;
+    }
+
+    .player-expanded-queue-container {
+        width: 100%;
+        height: 500px;
+        /* Specific height to enable internal scroll */
+        flex: none;
+        background: rgba(255, 255, 255, 0.03);
+        border-radius: var(--radius-lg);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        overflow: hidden;
+        margin-bottom: 30px;
+    }
+
+    .player-expanded-art {
+        width: 260px;
+        height: 260px;
+    }
+
+    .player-expanded-title {
+        font-size: 1.5rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .player-expanded-art {
+        width: 200px;
+        height: 200px;
+    }
+
+    .player-expanded-volume {
+        display: none;
+    }
+}

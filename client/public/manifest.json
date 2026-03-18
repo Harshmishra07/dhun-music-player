@@ -1,0 +1,22 @@
+{
+    "name": "Dhun - Music Player",
+    "short_name": "Dhun",
+    "description": "Stream music from YouTube Music with a beautiful interface",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#0a0a0f",
+    "theme_color": "#8b5cf6",
+    "orientation": "portrait-primary",
+    "icons": [
+        {
+            "src": "/favicon.svg",
+            "sizes": "any",
+            "type": "image/svg+xml",
+            "purpose": "any maskable"
+        }
+    ],
+    "categories": [
+        "music",
+        "entertainment"
+    ]
+}
