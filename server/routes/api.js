@@ -15,6 +15,21 @@ function formatDuration(seconds) {
     return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+// Helper to safely parse JSON and support both `saavn.dev` (success: true) and `saavn.me` (status: "SUCCESS")
+async function safeFetchJson(url) {
+    const res = await fetch(url);
+    const text = await res.text();
+    try {
+        const data = JSON.parse(text);
+        // Normalize success flag
+        const isSuccess = data.success === true || data.status === 'SUCCESS';
+        return { isSuccess, data: data.data || data };
+    } catch (e) {
+        console.error(`Error parsing JSON from ${url}:`, text.substring(0, 100));
+        return { isSuccess: false, data: null };
+    }
+}
+
 // Search songs
 router.get('/search', async (req, res) => {
     try {
@@ -23,17 +38,14 @@ router.get('/search', async (req, res) => {
             return res.status(400).json({ error: 'Query parameter "q" is required' });
         }
 
-        const response = await fetch(`${SAAVN_BASE_URL}/search/songs?query=${encodeURIComponent(query)}&limit=20`);
-        const data = await response.json();
+        const { isSuccess, data } = await safeFetchJson(`${SAAVN_BASE_URL}/search/songs?query=${encodeURIComponent(query)}&limit=20`);
 
-        if (!data.success || !data.data || !data.data.results) {
+        if (!isSuccess || !data || !data.results) {
             return res.json({ results: [] });
         }
 
-        const songs = data.data.results.map(song => {
-            // Pick highest quality image
+        const songs = data.results.map(song => {
             const image = song.image?.find(i => i.quality === '500x500')?.link || song.image?.[song.image.length - 1]?.link || '';
-            
             return {
                 videoId: song.id,
                 title: song.name,
@@ -51,7 +63,7 @@ router.get('/search', async (req, res) => {
     }
 });
 
-// Get search suggestions (Top 5 song names for autocomplete)
+// Get search suggestions
 router.get('/suggestions', async (req, res) => {
     try {
         const query = req.query.q;
@@ -59,14 +71,13 @@ router.get('/suggestions', async (req, res) => {
             return res.status(400).json({ error: 'Query parameter "q" is required' });
         }
 
-        const response = await fetch(`${SAAVN_BASE_URL}/search/songs?query=${encodeURIComponent(query)}&limit=5`);
-        const data = await response.json();
+        const { isSuccess, data } = await safeFetchJson(`${SAAVN_BASE_URL}/search/songs?query=${encodeURIComponent(query)}&limit=5`);
 
-        if (!data.success || !data.data || !data.data.results) {
+        if (!isSuccess || !data || !data.results) {
             return res.json([]);
         }
 
-        const suggestions = data.data.results.map(song => song.name);
+        const suggestions = data.results.map(song => song.name);
         res.json(suggestions);
     } catch (error) {
         console.error('Suggestions error:', error.message);
@@ -79,36 +90,30 @@ router.get('/stream/:videoId', async (req, res) => {
     const videoId = req.params.videoId;
     
     try {
-        // 1. Fetch song details
-        const detailsRes = await fetch(`${SAAVN_BASE_URL}/songs/${videoId}`);
-        const detailsData = await detailsRes.json();
+        const { isSuccess, data } = await safeFetchJson(`${SAAVN_BASE_URL}/songs/${videoId}`);
         
-        if (!detailsData.success || !detailsData.data || detailsData.data.length === 0) {
+        if (!isSuccess || !data || data.length === 0) {
             return res.status(404).json({ error: 'Song not found' });
         }
         
-        const songData = detailsData.data[0];
+        const songData = data[0];
         
-        // 2. Find highest quality download URL (usually 320kbps or 160kbps)
         const downloadUrls = songData.downloadUrl;
         if (!downloadUrls || downloadUrls.length === 0) {
             return res.status(404).json({ error: 'No audio URL found for this song' });
         }
         
-        // Get the best quality available
         const bestAudio = downloadUrls.find(u => u.quality === '320kbps') || 
                           downloadUrls.find(u => u.quality === '160kbps') || 
                           downloadUrls[downloadUrls.length - 1];
                           
         const audioUrl = bestAudio.link;
-        console.log(`✅ Streaming ${videoId} via Saavn [${bestAudio.quality}]`);
 
-        // 3. Proxy the stream
         const protocol = audioUrl.startsWith('https') ? https : http;
 
         const proxyReq = protocol.get(audioUrl, {
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'User-Agent': 'Mozilla/5.0',
                 ...(req.headers.range ? { 'Range': req.headers.range } : {}),
             }
         }, (proxyRes) => {
@@ -119,7 +124,6 @@ router.get('/stream/:videoId', async (req, res) => {
                 return;
             }
 
-            // Forward relevant headers including Range/Content-Length for seeking
             const forwardHeaders = ['content-type', 'content-length', 'content-range', 'accept-ranges'];
             forwardHeaders.forEach(header => {
                 if (proxyRes.headers[header]) {
@@ -133,57 +137,42 @@ router.get('/stream/:videoId', async (req, res) => {
         });
 
         proxyReq.on('error', (err) => {
-            console.error('Proxy error:', err.message);
-            if (!res.headersSent) {
-                res.status(500).json({ error: 'Failed to proxy audio' });
-            }
+            console.error('Proxy error:', err);
+            if (!res.headersSent) res.status(500).json({ error: 'Failed to proxy audio' });
         });
 
-        req.on('close', () => {
-            proxyReq.destroy();
-        });
+        req.on('close', () => proxyReq.destroy());
 
     } catch (error) {
         console.error('Stream error:', error.message);
-        if (!res.headersSent) {
-            res.status(500).json({ error: 'Failed to stream audio' });
-        }
+        if (!res.headersSent) res.status(500).json({ error: 'Failed to stream audio' });
     }
 });
 
-// Get Recommendations (Based on Artist of the current song)
+// Get Recommendations
 router.get('/recommendations/:videoId', async (req, res) => {
     try {
         const videoId = req.params.videoId;
         
-        // Fetch song details to get artist name
-        const detailsRes = await fetch(`${SAAVN_BASE_URL}/songs/${videoId}`);
-        const detailsData = await detailsRes.json();
+        const { isSuccess: isSongFound, data: songDetailsData } = await safeFetchJson(`${SAAVN_BASE_URL}/songs/${videoId}`);
         
-        if (!detailsData.success || !detailsData.data || detailsData.data.length === 0) {
+        if (!isSongFound || !songDetailsData || songDetailsData.length === 0) {
             return res.json({ results: [] });
         }
         
-        const songData = detailsData.data[0];
-        const artist = songData.primaryArtists?.split(',')[0] || '';
+        const artist = songDetailsData[0].primaryArtists?.split(',')[0] || '';
+        if (!artist) return res.json({ results: [] });
         
-        if (!artist) {
+        const { isSuccess: isRecsFound, data: recsData } = await safeFetchJson(`${SAAVN_BASE_URL}/search/songs?query=${encodeURIComponent(artist)}&limit=20`);
+        
+        if (!isRecsFound || !recsData || !recsData.results) {
             return res.json({ results: [] });
         }
         
-        // Search songs by that artist to simulate recommendations
-        const recsRes = await fetch(`${SAAVN_BASE_URL}/search/songs?query=${encodeURIComponent(artist)}&limit=20`);
-        const recsData = await recsRes.json();
-        
-        if (!recsData.success || !recsData.data || !recsData.data.results) {
-            return res.json({ results: [] });
-        }
-        
-        const recommendations = recsData.data.results
-            .filter(song => song.id !== videoId) // Exclude current song
+        const recommendations = recsData.results
+            .filter(song => song.id !== videoId)
             .map(song => {
                 const image = song.image?.find(i => i.quality === '500x500')?.link || song.image?.[song.image.length - 1]?.link || '';
-                
                 return {
                     videoId: song.id,
                     title: song.name,
@@ -210,12 +199,11 @@ router.get('/home', async (req, res) => {
         
         const sectionsData = await Promise.all(
             queriesToFetch.map(async (query) => {
-                const response = await fetch(`${SAAVN_BASE_URL}/search/songs?query=${encodeURIComponent(query)}&limit=10`);
-                const data = await response.json();
+                const { isSuccess, data } = await safeFetchJson(`${SAAVN_BASE_URL}/search/songs?query=${encodeURIComponent(query)}&limit=10`);
                 
-                if (!data.success || !data.data || !data.data.results) return null;
+                if (!isSuccess || !data || !data.results) return null;
                 
-                const items = data.data.results.map(song => {
+                const items = data.results.map(song => {
                     const image = song.image?.find(i => i.quality === '500x500')?.link || song.image?.[song.image.length - 1]?.link || '';
                     return {
                         videoId: song.id,
@@ -227,9 +215,7 @@ router.get('/home', async (req, res) => {
                     };
                 });
                 
-                // Capitalize title
                 const title = query.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-                
                 return { title, contents: items };
             })
         );
