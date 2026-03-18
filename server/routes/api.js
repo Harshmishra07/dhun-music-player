@@ -226,7 +226,7 @@ const AUDIO_CACHE_TTL = 3 * 60 * 60 * 1000; // 3 hours (YouTube URLs last 4-6h)
 // Track active prefetch operations to avoid duplicates
 const activePrefetches = new Map();
 
-// Common yt-dlp options for speed
+// Common yt-dlp options — use TV/mobile clients to bypass server IP blocks
 const YT_DLP_BASE_OPTS = {
     getUrl: true,
     noCheckCertificates: true,
@@ -234,51 +234,58 @@ const YT_DLP_BASE_OPTS = {
     noPlaylist: true,
     preferFreeFormats: true,
     noCallHome: true,
-    socketTimeout: 5,
+    socketTimeout: 15,
+    // Spoof as TV Embedded client — avoids most server IP restrictions
+    addHeader: [
+        'User-Agent:Mozilla/5.0 (SMART-TV; Linux; Tizen 5.0) AppleWebKit/538.1 (KHTML, like Gecko) Version/5.0 TV Safari/538.1',
+    ],
 };
 
-async function extractAudioUrl(videoId) {
-    // Fast path: try best audio on YouTube Music first (most common success)
-    try {
-        const result = await youtubedl(
-            `https://music.youtube.com/watch?v=${videoId}`,
-            { ...YT_DLP_BASE_OPTS, format: 'bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio' }
-        );
-        const audioUrl = typeof result === 'string' ? result.trim() : result;
-        if (audioUrl && audioUrl.startsWith('http')) {
-            console.log(`✅ Got audio URL for ${videoId} (fast path - YTMusic)`);
-            return audioUrl;
-        }
-    } catch (err) {
-        console.log(`⚠️ Fast path failed for ${videoId}: ${err.stderr?.substring(0, 80) || err.message?.substring(0, 80)}`);
-    }
+// Player clients to try in priority order — server-friendly clients first
+const PLAYER_CLIENT_SEQUENCE = [
+    'tv_embedded',    // Smart TV — bypasses most IP blocks
+    'ios',            // iOS app — high success rate  
+    'mweb',           // Mobile web — fallback
+    'web',            // Default web — may fail on server IPs
+];
 
-    // Fallback: try YouTube with broader format options
-    const fallbackFormats = ['bestaudio*', 'best'];
-    const fallbackUrls = [
-        `https://www.youtube.com/watch?v=${videoId}`,
+async function extractAudioUrl(videoId) {
+    const urls = [
         `https://music.youtube.com/watch?v=${videoId}`,
+        `https://www.youtube.com/watch?v=${videoId}`,
+    ];
+    const formats = [
+        'bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio',
+        'bestaudio*',
+        'best',
     ];
 
-    for (const sourceUrl of fallbackUrls) {
-        for (const format of fallbackFormats) {
-            try {
-                const result = await youtubedl(sourceUrl, {
-                    ...YT_DLP_BASE_OPTS,
-                    format: format,
-                });
-                const audioUrl = typeof result === 'string' ? result.trim() : result;
-                if (audioUrl && audioUrl.startsWith('http')) {
-                    console.log(`✅ Got audio URL for ${videoId} (fallback: ${format})`);
-                    return audioUrl;
+    for (const playerClient of PLAYER_CLIENT_SEQUENCE) {
+        for (const sourceUrl of urls) {
+            for (const format of formats) {
+                try {
+                    const result = await youtubedl(sourceUrl, {
+                        ...YT_DLP_BASE_OPTS,
+                        format,
+                        extractor_args: `youtube:player_client=${playerClient}`,
+                    });
+                    const audioUrl = typeof result === 'string' ? result.trim() : result;
+                    if (audioUrl && audioUrl.startsWith('http')) {
+                        console.log(`✅ Got audio URL for ${videoId} (client=${playerClient}, format=${format})`);
+                        return audioUrl;
+                    }
+                } catch (err) {
+                    console.log(`⚠️ Failed [${playerClient}/${format}] for ${videoId}: ${
+                        (err.stderr || err.message || '').substring(0, 100)
+                    }`);
                 }
-            } catch (err) {
-                // Continue to next fallback
             }
         }
     }
+
     return null;
 }
+
 
 // Cache an audio URL with TTL
 function cacheAudioUrl(videoId, audioUrl) {
