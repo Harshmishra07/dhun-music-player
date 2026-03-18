@@ -4,7 +4,7 @@ import http from 'http';
 
 const router = Router();
 
-const SAAVN_BASE_URL = 'https://saavn.dev/api';
+const SAAVN_BASE_URL = 'https://jiosaavn-api-privatecvc2.vercel.app';
 
 // Helper to format duration from seconds to MM:SS
 function formatDuration(seconds) {
