@@ -5,8 +5,16 @@ import apiRoutes from './routes/api.js';
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// ALLOWED_ORIGIN env var should be set on Render to your Vercel app URL
+// e.g. https://dhun-music-player.vercel.app
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  ...(process.env.ALLOWED_ORIGIN ? [process.env.ALLOWED_ORIGIN] : []),
+];
+
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000'],
+  origin: allowedOrigins,
   methods: ['GET'],
 }));
 

@@ -1,4 +1,8 @@
-const API_BASE = '/api';
+// In production (Vercel), VITE_API_URL points to the Render backend.
+// In local dev, falls back to '/api' which Vite proxies to localhost:3001.
+const API_BASE = import.meta.env.VITE_API_URL
+    ? `${import.meta.env.VITE_API_URL}/api`
+    : '/api';
 
 export async function searchSongs(query) {
     const res = await fetch(`${API_BASE}/search?q=${encodeURIComponent(query)}`);
