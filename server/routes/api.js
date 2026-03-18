@@ -1,54 +1,46 @@
 import { Router } from 'express';
-import YTMusic from 'ytmusic-api';
-import youtubedl from 'youtube-dl-exec';
 import https from 'https';
 import http from 'http';
 
 const router = Router();
 
-// Initialize YTMusic API
-const ytmusic = new YTMusic();
-let isInitialized = false;
+const SAAVN_BASE_URL = 'https://saavn.dev/api';
 
-async function ensureInitialized() {
-    if (!isInitialized) {
-        await ytmusic.initialize();
-        isInitialized = true;
-        console.log('✅ YTMusic API initialized');
-    }
+// Helper to format duration from seconds to MM:SS
+function formatDuration(seconds) {
+    if (!seconds) return '0:00';
+    const numSeconds = parseInt(seconds, 10);
+    const m = Math.floor(numSeconds / 60);
+    const s = numSeconds % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
 // Search songs
 router.get('/search', async (req, res) => {
     try {
-        await ensureInitialized();
         const query = req.query.q;
         if (!query) {
             return res.status(400).json({ error: 'Query parameter "q" is required' });
         }
 
-        const results = await ytmusic.searchSongs(query);
+        const response = await fetch(`${SAAVN_BASE_URL}/search/songs?query=${encodeURIComponent(query)}&limit=20`);
+        const data = await response.json();
 
-        const songs = results.map(song => {
-            // Resolve artist name — ytmusic-api sometimes returns song name as artist name
-            let artistName = song.artist?.name || '';
-            if (!artistName || artistName === song.name) {
-                // Try artists array (plural) as fallback
-                if (Array.isArray(song.artists) && song.artists.length > 0) {
-                    artistName = song.artists.map(a => a.name || a).filter(Boolean).join(', ');
-                }
-            }
-            if (!artistName || artistName === song.name) {
-                artistName = 'Unknown Artist';
-            }
+        if (!data.success || !data.data || !data.data.results) {
+            return res.json({ results: [] });
+        }
 
+        const songs = data.data.results.map(song => {
+            // Pick highest quality image
+            const image = song.image?.find(i => i.quality === '500x500')?.link || song.image?.[song.image.length - 1]?.link || '';
+            
             return {
-                videoId: song.videoId,
+                videoId: song.id,
                 title: song.name,
-                artist: artistName,
+                artist: song.primaryArtists || 'Unknown Artist',
                 album: song.album?.name || '',
-                duration: song.duration,
-                thumbnail: song.thumbnails?.[song.thumbnails.length - 1]?.url || '',
+                duration: formatDuration(song.duration),
+                thumbnail: image,
             };
         });
 
@@ -59,338 +51,75 @@ router.get('/search', async (req, res) => {
     }
 });
 
-// Get search suggestions
+// Get search suggestions (Top 5 song names for autocomplete)
 router.get('/suggestions', async (req, res) => {
     try {
-        await ensureInitialized();
         const query = req.query.q;
         if (!query) {
             return res.status(400).json({ error: 'Query parameter "q" is required' });
         }
 
-        const suggestions = await ytmusic.getSearchSuggestions(query);
-        res.json({ suggestions });
+        const response = await fetch(`${SAAVN_BASE_URL}/search/songs?query=${encodeURIComponent(query)}&limit=5`);
+        const data = await response.json();
+
+        if (!data.success || !data.data || !data.data.results) {
+            return res.json([]);
+        }
+
+        const suggestions = data.data.results.map(song => song.name);
+        res.json(suggestions);
     } catch (error) {
         console.error('Suggestions error:', error.message);
         res.status(500).json({ error: 'Failed to get suggestions' });
     }
 });
 
-// Get song details
-router.get('/song/:videoId', async (req, res) => {
-    try {
-        await ensureInitialized();
-        const { videoId } = req.params;
-        const song = await ytmusic.getSong(videoId);
-
-        // Resolve artist name
-        let artistName = song.artist?.name || '';
-        if (!artistName || artistName === song.name) {
-            if (Array.isArray(song.artists) && song.artists.length > 0) {
-                artistName = song.artists.map(a => a.name || a).filter(Boolean).join(', ');
-            }
-        }
-        if (!artistName || artistName === song.name) {
-            artistName = 'Unknown Artist';
-        }
-
-        res.json({
-            videoId: song.videoId,
-            title: song.name,
-            artist: artistName,
-            album: song.album?.name || '',
-            duration: song.duration,
-            thumbnail: song.thumbnails?.[song.thumbnails.length - 1]?.url || '',
-        });
-    } catch (error) {
-        console.error('Song details error:', error.message);
-        res.status(500).json({ error: 'Failed to get song details' });
-    }
-});
-
-// Helper to convert "MM:SS" or "HH:MM:SS" to seconds
-function parseDuration(d) {
-    if (typeof d === 'number') return d;
-    if (typeof d !== 'string') return 0;
-    const parts = d.split(':').map(Number);
-    if (parts.length === 2) return parts[0] * 60 + parts[1];
-    if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-    return 0;
-}
-
-// Helper: resolve artist name — ytmusic-api sometimes returns song name as artist
-function resolveArtistName(item, songTitle) {
-    let name = item.artist?.name || '';
-    if (!name || name === songTitle) {
-        if (Array.isArray(item.artists) && item.artists.length > 0) {
-            name = item.artists.map(a => a.name || a).filter(Boolean).join(', ');
-        }
-    }
-    return (!name || name === songTitle) ? 'Unknown Artist' : name;
-}
-
-
-
-// Get recommended songs based on a videoId
-router.get('/recommendations/:videoId', async (req, res) => {
-    try {
-        await ensureInitialized();
-        const { videoId } = req.params;
-
-        // getUpNexts provides related/recommended songs (same as YT auto-play)
-        let upNext = [];
-        try {
-            upNext = await ytmusic.getUpNexts(videoId);
-        } catch (err) {
-            console.log(`⚠️ getUpNexts failed for ${videoId}: ${err.message}. Trying fallback search...`);
-            try {
-                // Fallback Strategy 1: Get song details to find the artist, then search for artist's songs
-                const songInfo = await ytmusic.getSong(videoId);
-                const artistName = songInfo.artist?.name || '';
-                if (artistName) {
-                    const searchResults = await ytmusic.searchSongs(artistName);
-                    upNext = searchResults.filter(s => s.videoId !== videoId);
-                }
-            } catch (fallbackErr) {
-                console.log(`❌ Recommendation fallback search failed: ${fallbackErr.message}`);
-                
-                // Fallback Strategy 2: If everything fails, return some songs from the home cache if available
-                if (homeSectionsCache.data && homeSectionsCache.data.sections && homeSectionsCache.data.sections.length > 0) {
-                    console.log('ℹ️ Using home sections as last-resort recommendations');
-                    // Pick songs from the first section
-                    const sectionSongs = homeSectionsCache.data.sections[0].contents.filter(item => item.type === 'SONG');
-                    upNext = sectionSongs;
-                }
-            }
-        }
-
-        // Filter out items that aren't songs and format
-        console.log(`📊 Processing ${upNext.length} items for recommendations`);
-        const recommendations = upNext
-            .filter(item => item && (item.videoId || item.id)) // Ensure it's a playable track
-            .map(song => {
-                try {
-                    // handle different thumbnail formats
-                    let thumbUrl = '';
-                    if (Array.isArray(song.thumbnails) && song.thumbnails.length > 0) {
-                        const bestThumb = song.thumbnails[song.thumbnails.length - 1];
-                        thumbUrl = bestThumb?.url || '';
-                    } else if (typeof song.thumbnail === 'string') {
-                        thumbUrl = song.thumbnail;
-                    } else if (song.thumbnail && song.thumbnail.url) {
-                        thumbUrl = song.thumbnail.url;
-                    }
-
-                    // handle artists formatting
-                    let artistName = 'Unknown Artist';
-                    if (Array.isArray(song.artists) && song.artists.length > 0) {
-                        artistName = typeof song.artists[0] === 'string' ? song.artists[0] : (song.artists[0]?.name || 'Unknown Artist');
-                    } else if (typeof song.artists === 'string') {
-                        artistName = song.artists;
-                    } else if (song.artist && song.artist.name) {
-                        artistName = song.artist.name;
-                    } else if (typeof song.artist === 'string') {
-                        artistName = song.artist;
-                    }
-
-                    return {
-                        videoId: song.videoId || song.id,
-                        title: song.title || song.name || 'Unknown',
-                        artist: artistName,
-                        album: song.album?.name || '',
-                        duration: parseDuration(song.duration),
-                        thumbnail: thumbUrl,
-                    };
-                } catch (e) {
-                    console.error('Error mapping recommendation item:', e.message);
-                    return null;
-                }
-            })
-            .filter(Boolean)
-            .slice(0, 20); // Limit to top 20 recommendations
-
-        console.log(`✅ Returning ${recommendations.length} recommendations`);
-        res.json({ results: recommendations });
-    } catch (error) {
-        console.error('🔥 CRITICAL Recommendations error:', error);
-        if (!res.headersSent) {
-            res.status(500).json({ error: 'Failed to get recommendations', message: error.message });
-        }
-    }
-});
-
-// Audio URL cache to avoid repeated yt-dlp calls
-const audioUrlCache = new Map();
-const AUDIO_CACHE_TTL = 3 * 60 * 60 * 1000; // 3 hours (YouTube URLs last 4-6h)
-
-// Track active prefetch operations to avoid duplicates
-const activePrefetches = new Map();
-
-// Common yt-dlp options — use TV/mobile clients to bypass server IP blocks
-const YT_DLP_BASE_OPTS = {
-    getUrl: true,
-    noCheckCertificates: true,
-    noWarnings: true,
-    noPlaylist: true,
-    preferFreeFormats: true,
-    noCallHome: true,
-    socketTimeout: 15,
-    // Spoof as TV Embedded client — avoids most server IP restrictions
-    addHeader: [
-        'User-Agent:Mozilla/5.0 (SMART-TV; Linux; Tizen 5.0) AppleWebKit/538.1 (KHTML, like Gecko) Version/5.0 TV Safari/538.1',
-    ],
-};
-
-// Player clients to try in priority order — server-friendly clients first
-const PLAYER_CLIENT_SEQUENCE = [
-    'tv_embedded',    // Smart TV — bypasses most IP blocks
-    'ios',            // iOS app — high success rate  
-    'mweb',           // Mobile web — fallback
-    'web',            // Default web — may fail on server IPs
-];
-
-async function extractAudioUrl(videoId) {
-    const urls = [
-        `https://music.youtube.com/watch?v=${videoId}`,
-        `https://www.youtube.com/watch?v=${videoId}`,
-    ];
-    const formats = [
-        'bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio',
-        'bestaudio*',
-        'best',
-    ];
-
-    for (const playerClient of PLAYER_CLIENT_SEQUENCE) {
-        for (const sourceUrl of urls) {
-            for (const format of formats) {
-                try {
-                    const result = await youtubedl(sourceUrl, {
-                        ...YT_DLP_BASE_OPTS,
-                        format,
-                        extractor_args: `youtube:player_client=${playerClient}`,
-                    });
-                    const audioUrl = typeof result === 'string' ? result.trim() : result;
-                    if (audioUrl && audioUrl.startsWith('http')) {
-                        console.log(`✅ Got audio URL for ${videoId} (client=${playerClient}, format=${format})`);
-                        return audioUrl;
-                    }
-                } catch (err) {
-                    console.log(`⚠️ Failed [${playerClient}/${format}] for ${videoId}: ${
-                        (err.stderr || err.message || '').substring(0, 100)
-                    }`);
-                }
-            }
-        }
-    }
-
-    return null;
-}
-
-
-// Cache an audio URL with TTL
-function cacheAudioUrl(videoId, audioUrl) {
-    audioUrlCache.set(videoId, audioUrl);
-    setTimeout(() => audioUrlCache.delete(videoId), AUDIO_CACHE_TTL);
-}
-
-// Pre-fetch and cache audio URL in background
-async function prefetchAudioUrl(videoId) {
-    // Skip if already cached or already being prefetched
-    if (audioUrlCache.has(videoId)) return;
-    if (activePrefetches.has(videoId)) return;
-
-    const prefetchPromise = (async () => {
-        try {
-            console.log(`🔮 Prefetching audio URL for ${videoId}...`);
-            const audioUrl = await extractAudioUrl(videoId);
-            if (audioUrl) {
-                cacheAudioUrl(videoId, audioUrl);
-                console.log(`🔮 Prefetch complete for ${videoId}`);
-            }
-        } catch (err) {
-            console.log(`⚠️ Prefetch failed for ${videoId}: ${err.message?.substring(0, 80)}`);
-        } finally {
-            activePrefetches.delete(videoId);
-        }
-    })();
-
-    activePrefetches.set(videoId, prefetchPromise);
-    return prefetchPromise;
-}
-
-// ─── Prefetch Endpoint ───────────────────────────────────────────────
-router.get('/prefetch/:videoId', async (req, res) => {
-    try {
-        const { videoId } = req.params;
-
-        if (audioUrlCache.has(videoId)) {
-            return res.json({ status: 'cached' });
-        }
-
-        // Start prefetch in background, don't wait
-        prefetchAudioUrl(videoId);
-        res.json({ status: 'prefetching' });
-    } catch (error) {
-        res.json({ status: 'error' });
-    }
-});
-
-// Stream audio — uses yt-dlp to extract direct audio URL, then proxies it
+// Stream audio
 router.get('/stream/:videoId', async (req, res) => {
+    const videoId = req.params.videoId;
+    
     try {
-        const { videoId } = req.params;
-
-        console.log(`🎶 Streaming request: ${videoId}`);
-
-        // Check cache first
-        let audioUrl = audioUrlCache.get(videoId);
-
-        if (!audioUrl) {
-            // If a prefetch is in progress, wait for it instead of starting a new extraction
-            if (activePrefetches.has(videoId)) {
-                console.log(`⏳ Waiting for active prefetch for ${videoId}...`);
-                await activePrefetches.get(videoId);
-                audioUrl = audioUrlCache.get(videoId);
-            }
-
-            // If still no URL, extract now
-            if (!audioUrl) {
-                audioUrl = await extractAudioUrl(videoId);
-
-                if (!audioUrl) {
-                    return res.status(404).json({ error: 'No audio URL found for this song' });
-                }
-
-                cacheAudioUrl(videoId, audioUrl);
-            }
+        // 1. Fetch song details
+        const detailsRes = await fetch(`${SAAVN_BASE_URL}/songs/${videoId}`);
+        const detailsData = await detailsRes.json();
+        
+        if (!detailsData.success || !detailsData.data || detailsData.data.length === 0) {
+            return res.status(404).json({ error: 'Song not found' });
         }
+        
+        const songData = detailsData.data[0];
+        
+        // 2. Find highest quality download URL (usually 320kbps or 160kbps)
+        const downloadUrls = songData.downloadUrl;
+        if (!downloadUrls || downloadUrls.length === 0) {
+            return res.status(404).json({ error: 'No audio URL found for this song' });
+        }
+        
+        // Get the best quality available
+        const bestAudio = downloadUrls.find(u => u.quality === '320kbps') || 
+                          downloadUrls.find(u => u.quality === '160kbps') || 
+                          downloadUrls[downloadUrls.length - 1];
+                          
+        const audioUrl = bestAudio.link;
+        console.log(`✅ Streaming ${videoId} via Saavn [${bestAudio.quality}]`);
 
-        // Proxy the audio stream to avoid CORS issues
+        // 3. Proxy the stream
         const protocol = audioUrl.startsWith('https') ? https : http;
 
-        // Use headers that YouTube accepts for direct stream URLs
-        const proxyHeaders = {
-            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.210 Mobile Safari/537.36',
-            'Accept': '*/*',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Referer': 'https://www.youtube.com/',
-            'Origin': 'https://www.youtube.com',
-            'Connection': 'keep-alive',
-            ...(req.headers.range ? { 'Range': req.headers.range } : {}),
-        };
-
-        const proxyReq = protocol.get(audioUrl, { headers: proxyHeaders }, (proxyRes) => {
-            // If upstream returns error, log status and invalidate cache
+        const proxyReq = protocol.get(audioUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                ...(req.headers.range ? { 'Range': req.headers.range } : {}),
+            }
+        }, (proxyRes) => {
             if (proxyRes.statusCode >= 400) {
-                console.error(`❌ Upstream ${proxyRes.statusCode} for ${videoId} — invalidating cache`);
-                audioUrlCache.delete(videoId);
                 if (!res.headersSent) {
                     res.status(502).json({ error: `Audio source returned ${proxyRes.statusCode}` });
                 }
                 return;
             }
 
-            // Forward relevant headers
+            // Forward relevant headers including Range/Content-Length for seeking
             const forwardHeaders = ['content-type', 'content-length', 'content-range', 'accept-ranges'];
             forwardHeaders.forEach(header => {
                 if (proxyRes.headers[header]) {
@@ -413,6 +142,7 @@ router.get('/stream/:videoId', async (req, res) => {
         req.on('close', () => {
             proxyReq.destroy();
         });
+
     } catch (error) {
         console.error('Stream error:', error.message);
         if (!res.headersSent) {
@@ -421,293 +151,216 @@ router.get('/stream/:videoId', async (req, res) => {
     }
 });
 
-// ─── Home Sections (Trending) ────────────────────────────────────────
-const homeSectionsCache = { data: null, timestamp: 0 };
-const HOME_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+// Get Recommendations (Based on Artist of the current song)
+router.get('/recommendations/:videoId', async (req, res) => {
+    try {
+        const videoId = req.params.videoId;
+        
+        // Fetch song details to get artist name
+        const detailsRes = await fetch(`${SAAVN_BASE_URL}/songs/${videoId}`);
+        const detailsData = await detailsRes.json();
+        
+        if (!detailsData.success || !detailsData.data || detailsData.data.length === 0) {
+            return res.json({ results: [] });
+        }
+        
+        const songData = detailsData.data[0];
+        const artist = songData.primaryArtists?.split(',')[0] || '';
+        
+        if (!artist) {
+            return res.json({ results: [] });
+        }
+        
+        // Search songs by that artist to simulate recommendations
+        const recsRes = await fetch(`${SAAVN_BASE_URL}/search/songs?query=${encodeURIComponent(artist)}&limit=20`);
+        const recsData = await recsRes.json();
+        
+        if (!recsData.success || !recsData.data || !recsData.data.results) {
+            return res.json({ results: [] });
+        }
+        
+        const recommendations = recsData.data.results
+            .filter(song => song.id !== videoId) // Exclude current song
+            .map(song => {
+                const image = song.image?.find(i => i.quality === '500x500')?.link || song.image?.[song.image.length - 1]?.link || '';
+                
+                return {
+                    videoId: song.id,
+                    title: song.name,
+                    artist: song.primaryArtists || 'Unknown Artist',
+                    album: song.album?.name || '',
+                    duration: formatDuration(song.duration),
+                    thumbnail: image,
+                };
+            });
 
-function normalizeSection(section) {
-    return {
-        title: section.title || 'Recommended',
-        contents: (section.contents || [])
-            .filter(item => item && (item.type === 'SONG' || item.type === 'ALBUM' || item.type === 'PLAYLIST'))
-            .map(item => {
-                try {
-                    if (item.type === 'SONG') {
-                        // Resolve artist name
-                        let artistName = item.artist?.name || '';
-                        if (!artistName || artistName === (item.name || item.title)) {
-                            if (Array.isArray(item.artists) && item.artists.length > 0) {
-                                artistName = item.artists.map(a => a.name || a).filter(Boolean).join(', ');
-                            }
-                        }
-                        if (!artistName || artistName === (item.name || item.title)) {
-                            artistName = 'Unknown Artist';
-                        }
-                        return {
-                            type: 'SONG',
-                            videoId: item.videoId,
-                            title: item.name || item.title || 'Unknown',
-                            artist: artistName,
-                            album: item.album?.name || '',
-                            duration: item.duration,
-                            thumbnail: item.thumbnails?.[item.thumbnails.length - 1]?.url || '',
-                        };
-                    } else if (item.type === 'ALBUM') {
-                        return {
-                            type: 'ALBUM',
-                            albumId: item.albumId,
-                            playlistId: item.playlistId,
-                            title: item.name || item.title || 'Unknown',
-                            artist: item.artist?.name || 'Unknown Artist',
-                            year: item.year,
-                            thumbnail: item.thumbnails?.[item.thumbnails.length - 1]?.url || '',
-                        };
-                    } else {
-                        return {
-                            type: 'PLAYLIST',
-                            playlistId: item.playlistId,
-                            title: item.name || item.title || 'Unknown',
-                            artist: item.artist?.name || '',
-                            thumbnail: item.thumbnails?.[item.thumbnails.length - 1]?.url || '',
-                        };
-                    }
-                } catch {
-                    return null;
-                }
-            })
-            .filter(Boolean),
-    };
-}
+        res.json({ results: recommendations });
+    } catch (error) {
+        console.error('Recommendations error:', error.message);
+        res.status(500).json({ error: 'Failed to get recommendations' });
+    }
+});
 
+// Home page sections
 router.get('/home', async (req, res) => {
     try {
-        await ensureInitialized();
-
-        // Return cached data if still fresh
-        if (homeSectionsCache.data && Date.now() - homeSectionsCache.timestamp < HOME_CACHE_TTL) {
-            return res.json(homeSectionsCache.data);
-        }
-
-        let normalized = [];
-
-        // Strategy 1: Try getHomeSections
-        try {
-            const sections = await ytmusic.getHomeSections();
-            if (sections && sections.length > 0) {
-                normalized = sections
-                    .filter(s => s && s.contents && (!s.title || !s.title.toLowerCase().includes('music videos for you')))
-                    .map(normalizeSection)
-                    .filter(section => section.contents.length > 0);
-            }
-        } catch (err) {
-            console.log(`⚠️ getHomeSections failed: ${err.message?.substring(0, 100)}`);
-        }
-
-        // Strategy 2: Fallback — build sections from search results
-        if (normalized.length === 0) {
-            console.log('ℹ️ Using search-based fallback for home sections');
-            const fallbackQueries = [
-                { title: '🔥 Trending Now', query: 'trending songs 2025' },
-                { title: '🎵 Popular Hits', query: 'top hits popular songs' },
-                { title: '🎧 Chill Vibes', query: 'chill lofi relaxing music' },
-                { title: '🎶 Bollywood Hits', query: 'latest bollywood songs' },
-            ];
-
-            for (const { title, query } of fallbackQueries) {
-                try {
-                    const results = await ytmusic.searchSongs(query);
-                    if (results && results.length > 0) {
-                        normalized.push({
-                            title,
-                            contents: results.slice(0, 10).map(song => {
-                                let artistName = song.artist?.name || '';
-                                if (!artistName || artistName === song.name) {
-                                    if (Array.isArray(song.artists) && song.artists.length > 0) {
-                                        artistName = song.artists.map(a => a.name || a).filter(Boolean).join(', ');
-                                    }
-                                }
-                                if (!artistName || artistName === song.name) {
-                                    artistName = 'Unknown Artist';
-                                }
-                                return {
-                                    type: 'SONG',
-                                    videoId: song.videoId,
-                                    title: song.name || 'Unknown',
-                                    artist: artistName,
-                                    album: song.album?.name || '',
-                                    duration: song.duration,
-                                    thumbnail: song.thumbnails?.[song.thumbnails.length - 1]?.url || '',
-                                };
-                            }),
-                        });
-                    }
-                } catch (e) {
-                    console.log(`⚠️ Fallback search "${query}" failed: ${e.message?.substring(0, 80)}`);
-                }
-            }
-        }
-
-        homeSectionsCache.data = { sections: normalized };
-        homeSectionsCache.timestamp = Date.now();
-
-        res.json(homeSectionsCache.data);
+        const defaultQueries = ['trending', 'top hits', 'new releases', 'bollywood hits'];
+        const numSections = parseInt(req.query.sections) || 4;
+        const queriesToFetch = defaultQueries.slice(0, numSections);
+        
+        const sectionsData = await Promise.all(
+            queriesToFetch.map(async (query) => {
+                const response = await fetch(`${SAAVN_BASE_URL}/search/songs?query=${encodeURIComponent(query)}&limit=10`);
+                const data = await response.json();
+                
+                if (!data.success || !data.data || !data.data.results) return null;
+                
+                const items = data.data.results.map(song => {
+                    const image = song.image?.find(i => i.quality === '500x500')?.link || song.image?.[song.image.length - 1]?.link || '';
+                    return {
+                        videoId: song.id,
+                        title: song.name,
+                        artist: song.primaryArtists || 'Unknown Artist',
+                        album: song.album?.name || '',
+                        duration: formatDuration(song.duration),
+                        thumbnail: image,
+                    };
+                });
+                
+                // Capitalize title
+                const title = query.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                
+                return { title, contents: items };
+            })
+        );
+        
+        res.json({ sections: sectionsData.filter(Boolean) });
     } catch (error) {
-        console.error('Home sections error:', error.message);
-        res.status(500).json({ error: 'Failed to get home sections' });
+        console.error('Home content error:', error.message);
+        res.status(500).json({ error: 'Failed to fetch home content' });
+    }
+});
+// Get single song details
+router.get('/song/:videoId', async (req, res) => {
+    try {
+        const videoId = req.params.videoId;
+        const response = await fetch(`${SAAVN_BASE_URL}/songs/${videoId}`);
+        const data = await response.json();
+        
+        if (!data.success || !data.data || data.data.length === 0) {
+            return res.status(404).json({ error: 'Song not found' });
+        }
+        
+        const song = data.data[0];
+        const image = song.image?.find(i => i.quality === '500x500')?.link || song.image?.[song.image.length - 1]?.link || '';
+        
+        res.json({
+            videoId: song.id,
+            title: song.name,
+            artist: song.primaryArtists || 'Unknown Artist',
+            album: song.album?.name || '',
+            duration: formatDuration(song.duration),
+            thumbnail: image,
+        });
+    } catch (error) {
+        console.error('Song details error:', error.message);
+        res.status(500).json({ error: 'Failed to fetch song details' });
     }
 });
 
-// ─── Genre Search ────────────────────────────────────────────────────
-const genreCache = new Map();
-const GENRE_CACHE_TTL = 10 * 60 * 1000;
-
-router.get('/genre/:genre', async (req, res) => {
+// Genre/Mood playlists (map to search for now)
+router.get('/genre/:genreId', async (req, res) => {
     try {
-        await ensureInitialized();
-        const { genre } = req.params;
-
-        // Check cache
-        const cached = genreCache.get(genre);
-        if (cached && Date.now() - cached.timestamp < GENRE_CACHE_TTL) {
-            return res.json(cached.data);
+        const genreId = req.params.genreId;
+        const response = await fetch(`${SAAVN_BASE_URL}/search/songs?query=${encodeURIComponent(genreId)}&limit=20`);
+        const data = await response.json();
+        
+        if (!data.success || !data.data || !data.data.results) {
+            return res.json({ results: [] });
         }
-
-        const results = await ytmusic.searchSongs(`${genre} songs`);
-
-        const songs = results.map(song => {
-            let artistName = song.artist?.name || '';
-            if (!artistName || artistName === song.name) {
-                if (Array.isArray(song.artists) && song.artists.length > 0) {
-                    artistName = song.artists.map(a => a.name || a).filter(Boolean).join(', ');
-                }
-            }
-            if (!artistName || artistName === song.name) {
-                artistName = 'Unknown Artist';
-            }
+        
+        const songs = data.data.results.map(song => {
+            const image = song.image?.find(i => i.quality === '500x500')?.link || song.image?.[song.image.length - 1]?.link || '';
             return {
-                videoId: song.videoId,
+                videoId: song.id,
                 title: song.name,
-                artist: artistName,
+                artist: song.primaryArtists || 'Unknown Artist',
                 album: song.album?.name || '',
-                duration: song.duration,
-                thumbnail: song.thumbnails?.[song.thumbnails.length - 1]?.url || '',
+                duration: formatDuration(song.duration),
+                thumbnail: image,
             };
         });
-
-        const data = { results: songs };
-        genreCache.set(genre, { data, timestamp: Date.now() });
-
-        // Cleanup old genre cache entries
-        if (genreCache.size > 50) {
-            const oldest = [...genreCache.entries()].sort((a, b) => a[1].timestamp - b[1].timestamp);
-            genreCache.delete(oldest[0][0]);
-        }
-
-        res.json(data);
+        
+        res.json({ results: songs });
     } catch (error) {
-        console.error('Genre search error:', error.message);
-        res.status(500).json({ error: 'Failed to get genre songs' });
+        console.error('Genre error:', error.message);
+        res.status(500).json({ error: 'Failed to fetch genre' });
     }
 });
 
-// ─── Get Playlist Songs ──────────────────────────────────────────────
+// Playlists (map to saavn playlist endpoint)
 router.get('/playlist/:playlistId', async (req, res) => {
     try {
-        await ensureInitialized();
-        const { playlistId } = req.params;
-        const playlistName = req.query.name || '';
-
-        let songs = [];
-
-        // Strategy 1: Try getPlaylistVideos
-        try {
-            const videos = await ytmusic.getPlaylistVideos(playlistId);
-            if (videos && videos.length > 0) {
-                songs = videos.map(video => ({
-                    videoId: video.videoId,
-                    title: video.name,
-                    artist: resolveArtistName(video, video.name),
-                    album: '',
-                    duration: video.duration,
-                    thumbnail: video.thumbnails?.[video.thumbnails.length - 1]?.url || '',
-                }));
-            }
-        } catch (e) {
-            console.log(`⚠️ getPlaylistVideos failed for ${playlistId}: ${e.message}`);
+        const playlistId = req.params.playlistId;
+        const response = await fetch(`${SAAVN_BASE_URL}/playlists?id=${playlistId}`);
+        const data = await response.json();
+        
+        if (!data.success || !data.data || !data.data.songs) {
+            return res.json({ results: [] });
         }
-
-        // Strategy 2: Try getPlaylist (has songs embedded for some playlists)
-        if (songs.length === 0) {
-            try {
-                const playlist = await ytmusic.getPlaylist(playlistId);
-                if (playlist.songs && playlist.songs.length > 0) {
-                    songs = playlist.songs.map(song => ({
-                        videoId: song.videoId,
-                        title: song.name,
-                        artist: resolveArtistName(song, song.name),
-                        album: song.album?.name || '',
-                        duration: song.duration,
-                        thumbnail: song.thumbnails?.[song.thumbnails.length - 1]?.url || '',
-                    }));
-                }
-            } catch (e) {
-                console.log(`⚠️ getPlaylist failed for ${playlistId}: ${e.message}`);
-            }
-        }
-
-        // Strategy 3: Fallback to search if playlist name is provided
-        if (songs.length === 0 && playlistName) {
-            try {
-                const results = await ytmusic.searchSongs(playlistName);
-                songs = results.slice(0, 20).map(song => ({
-                    videoId: song.videoId,
-                    title: song.name,
-                    artist: resolveArtistName(song, song.name),
-                    album: song.album?.name || '',
-                    duration: song.duration,
-                    thumbnail: song.thumbnails?.[song.thumbnails.length - 1]?.url || '',
-                }));
-            } catch (e) {
-                console.log(`⚠️ Search fallback failed for "${playlistName}": ${e.message}`);
-            }
-        }
-
+        
+        const songs = data.data.songs.map(song => {
+            const image = song.image?.find(i => i.quality === '500x500')?.link || song.image?.[song.image.length - 1]?.link || '';
+            return {
+                videoId: song.id,
+                title: song.name,
+                artist: song.primaryArtists || 'Unknown Artist',
+                album: song.album?.name || '',
+                duration: formatDuration(song.duration),
+                thumbnail: image,
+            };
+        });
+        
         res.json({ results: songs });
     } catch (error) {
         console.error('Playlist error:', error.message);
-        res.status(500).json({ error: 'Failed to get playlist songs' });
+        res.status(500).json({ error: 'Failed to fetch playlist' });
     }
 });
 
-// ─── Get Album Songs ─────────────────────────────────────────────────
+// Albums (map to saavn album endpoint)
 router.get('/album/:albumId', async (req, res) => {
     try {
-        await ensureInitialized();
-        const { albumId } = req.params;
-
-        const album = await ytmusic.getAlbum(albumId);
-
-        const songs = (album.songs || []).map(song => {
-            let artistName = resolveArtistName(song, song.name);
-            if (artistName === 'Unknown Artist' && album.artist?.name) {
-                artistName = album.artist.name;
-            }
+        const albumId = req.params.albumId;
+        const response = await fetch(`${SAAVN_BASE_URL}/albums?id=${albumId}`);
+        const data = await response.json();
+        
+        if (!data.success || !data.data || !data.data.songs) {
+            return res.json({ results: [] });
+        }
+        
+        const songs = data.data.songs.map(song => {
+            const image = song.image?.find(i => i.quality === '500x500')?.link || song.image?.[song.image.length - 1]?.link || '';
             return {
-                videoId: song.videoId,
+                videoId: song.id,
                 title: song.name,
-                artist: artistName,
-                album: album.name || '',
-                duration: song.duration,
-                thumbnail: song.thumbnails?.[song.thumbnails.length - 1]?.url || ''
-                    || album.thumbnails?.[album.thumbnails.length - 1]?.url || '',
+                artist: song.primaryArtists || 'Unknown Artist',
+                album: song.album?.name || '',
+                duration: formatDuration(song.duration),
+                thumbnail: image,
             };
         });
-
-        res.json({ results: songs, albumName: album.name, artist: album.artist?.name });
+        
+        res.json({ results: songs });
     } catch (error) {
         console.error('Album error:', error.message);
-        res.status(500).json({ error: 'Failed to get album songs' });
+        res.status(500).json({ error: 'Failed to fetch album' });
     }
+});
+
+// Prefetch stream (no-op for Saavn because extraction is instant)
+router.get('/prefetch/:videoId', (req, res) => {
+    res.status(200).send('Prefetch not needed for Saavn');
 });
 
 export default router;
