@@ -26,13 +26,20 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
     const { request } = event;
 
-    // Skip non-GET requests
+    // Skip non-GET and non-http(s) requests (chrome-extension etc.)
     if (request.method !== 'GET') return;
+    if (!request.url.startsWith('http')) return;
 
-    // Network-first for API calls
+    // Network-first for API calls — always go to network, fall back to cache
     if (request.url.includes('/api/')) {
         event.respondWith(
-            fetch(request).catch(() => caches.match(request))
+            fetch(request)
+                .then((res) => res)
+                .catch(() =>
+                    caches.match(request).then(
+                        (cached) => cached || new Response('Network error', { status: 503 })
+                    )
+                )
         );
         return;
     }
@@ -42,13 +49,20 @@ self.addEventListener('fetch', (event) => {
         caches.match(request).then((cached) => {
             if (cached) return cached;
             return fetch(request).then((response) => {
-                // Cache successful responses for static assets
-                if (response.ok && (request.url.endsWith('.js') || request.url.endsWith('.css') || request.url.endsWith('.html'))) {
+                // Only cache same-origin successful responses
+                if (
+                    response.ok &&
+                    response.type === 'basic' &&
+                    (request.url.endsWith('.js') ||
+                        request.url.endsWith('.css') ||
+                        request.url.endsWith('.html'))
+                ) {
                     const clone = response.clone();
                     caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
                 }
                 return response;
-            });
+            }).catch(() => new Response('Network error', { status: 503 }));
         })
     );
 });
+
